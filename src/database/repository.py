@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.database.schema import init_database
+from src.database.schema import init_database, SCHEMA_SQL
 
 
 class Database:
@@ -25,6 +25,27 @@ class Database:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+    def ensure_defaults(self):
+        """Crea datos por defecto si no existen."""
+        # Tabla de usuarios
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre      TEXT NOT NULL UNIQUE,
+                password    TEXT NOT NULL,
+                rol         TEXT NOT NULL DEFAULT 'admin',
+                created_at  TEXT DEFAULT (datetime('now','localtime'))
+            );
+        """)
+        # Usuario admin por defecto
+        cur = self.conn.execute("SELECT COUNT(*) FROM usuarios")
+        if cur.fetchone()[0] == 0:
+            self.conn.execute(
+                "INSERT INTO usuarios (nombre, password, rol) VALUES (?, ?, ?)",
+                ("admin", "admin", "admin")
+            )
+        self.conn.commit()
 
     # ── Genéricos CRUD ──────────────────────────────────────────────────────
 
@@ -48,8 +69,7 @@ class Database:
         return cur.lastrowid
 
     def update(self, table: str, id_val: int, data: dict):
-        data["updated_at"] = data.get("updated_at", "datetime('now','localtime')")
-        sets = ", ".join(f"{k} = ?" for k in data)
+        sets = ", ".join(f"{k} = ?" for k in data.keys())
         self.conn.execute(
             f"UPDATE {table} SET {sets} WHERE id = ?",
             tuple(data.values()) + (id_val,),
