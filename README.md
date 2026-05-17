@@ -1,82 +1,98 @@
-# 🏗️ ERP Constructora
+# ERP Constructora
 
-Sistema de Gestión para Empresas Constructoras — modular, escalable, código abierto.
+Sistema de gestión empresarial para constructoras. Escritorio (Windows/Linux/macOS).
 
-## Arquitectura
+## Estado Actual
 
-```
-erp-constructora/
-├── main.py                 # Punto de entrada
-├── requirements.txt        # Dependencias Python
-├── build.bat               # Build para Windows (.exe)
-├── src/
-│   ├── database/
-│   │   ├── schema.py       # DDL — 4 niveles jerárquicos
-│   │   └── repository.py   # Capa de datos (CRUD + consultas)
-│   └── gui/
-│       ├── widgets.py      # Widgets base reutilizables
-│       └── tabs/
-│           ├── obras_tab.py
-│           ├── clientes_tab.py
-│           ├── catalogo_tab.py
-│           └── presupuesto_tab.py
-└── data/                   # Base de datos SQLite (auto-creada)
-```
+**v1.1.0** — Módulo de Usuarios y Roles implementado.
 
-## Jerarquía del Presupuesto
+### ✅ Implementado
+- Login con autenticación (admin / admin)
+- CRUD completo de usuarios
+- 6 roles jerárquicos (Administrador → Auditor)
+- Asignación múltiple de roles por usuario
+- Diseño corporativo oscuro premium
+- Base de datos SQLite con constraints
+- Validaciones: username único, máx 20 chars, password máx 20 chars
+- Core Launcher para futuros módulos
+- Logging de eventos
+- Build .exe para Windows
 
-```
-N1 — Rubro:       1.00,  2.00,  3.00...
-N2 — SubRubro:    1.01,  2.01,  8.01...
-N3 — Item:        1.01.01,  2.01.02,  8.01.01...
-N4 — SubItem:     1.01.01.01,  8.01.01.01...
-```
-
-Cada línea en el detalle tiene: **Cantidad × (Precio Material + Precio Mano de Obra)**
+### 🔄 En desarrollo
+- Próximos módulos (Presupuestos, Obras, etc.)
 
 ## Requisitos
 
-- Python 3.11 o superior
+- Python 3.11+
 - Windows, Linux o macOS
 
-## Instalación y ejecución
+## Instalación
 
 ```bash
-# 1. Clonar
-git clone <repo-url>
+git clone https://github.com/marcoskrauerrr-cpu/erp-constructora.git
 cd erp-constructora
-
-# 2. Crear entorno virtual
 python -m venv venv
 
 # Windows:
 venv\Scripts\activate
-# Linux/Mac:
+
+# Linux/macOS:
 source venv/bin/activate
 
-# 3. Instalar dependencias
 pip install -r requirements.txt
-
-# 4. Ejecutar
 python main.py
 ```
+
+## Credenciales por defecto
+
+- **Usuario:** `admin`
+- **Contraseña:** `admin`
+
+## Roles del sistema
+
+| Rol | Nivel | Descripción |
+|-----|-------|-------------|
+| Administrador | 100 | Acceso total al sistema |
+| Gerente | 80 | Reportes y aprobación de presupuestos |
+| Supervisor | 60 | Gestión de obras y asignación de tareas |
+| Operador | 40 | Carga de datos y registro de avance |
+| Lector | 20 | Solo consulta de informes |
+| Auditor | 10 | Solo lectura con trazabilidad |
 
 ## Build para Windows (.exe)
 
 ```bash
 build.bat
-# Genera: dist/ERP Constructora.exe
 ```
 
-## Módulos
+El ejecutable se genera en `dist\ERP Constructora\ERP Constructora.exe`.
 
-| Módulo | Estado |
-|--------|--------|
-| Obras (CRUD) | ✅ Implementado |
-| Clientes (CRUD) | ✅ Implementado |
-| Catálogo (Rubros, SubRubros, Items, SubItems) | ✅ Implementado |
-| Presupuesto Detalle | ✅ Implementado |
-| Cálculos (subtotales por rubro + total) | ✅ Implementado |
-| Importación Excel | 🔜 Próximo |
-| Órdenes de Compra | 🔜 Próximo |
-| Avance de Obra | 🔜 Próximo |
+## Estructura del proyecto
+
+```
+erp-constructora/
+├── main.py                       # Entry point
+├── requirements.txt              # Dependencias
+├── build.bat                     # Build Windows
+├── data/
+│   └── erp_constructora.db       # Base de datos SQLite
+└── src/
+    ├── core/
+    │   └── launcher.py           # Core Launcher (gestor de módulos)
+    ├── database/
+    │   ├── schema.py             # DDL de la base de datos
+    │   └── repository.py         # CRUD con validaciones
+    ├── gui/
+    │   ├── login.py              # Pantalla de login
+    │   ├── admin_panel.py        # CRUD de usuarios y roles
+    │   └── styles/
+    │       └── futuristic_style.py  # Tema oscuro corporativo
+    └── __init__.py
+```
+
+## Tecnologías
+
+- Python 3.11+
+- PySide6 (Qt for Python)
+- SQLite
+- PyInstaller (build .exe)

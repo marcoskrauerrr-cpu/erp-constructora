@@ -3,51 +3,65 @@ Repository - Capa de acceso a datos para Usuarios y Roles
 """
 
 import sqlite3
+import hashlib
+import logging
+import re
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class UsuarioRepository:
-    """CRUD de usuarios con validaciones de unicidad y longitud."""
-
-    # Constantes de validación
     MAX_USERNAME = 20
     MAX_PASSWORD = 20
 
-    def __init__(self, db_path):
+    def __init__(self, db_path: str):
         self.db_path = db_path
 
     def _connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @staticmethod
+    def _hash_password(password: str) -> str:
+        """Genera hash SHA-256 con salt incluido (formato: salt$hash)."""
+        salt = hashlib.sha256(password.encode()).hexdigest()[:8]
+        hashed = hashlib.sha256((salt + password).encode()).hexdigest()
+        return f"{salt}${hashed}"
+
+    @staticmethod
+    def _check_password(password: str, stored: str) -> bool:
+        """Verifica contraseña contra hash almacenado (compatible con texto plano y con hash)."""
+        # Compatibilidad hacia atrás: texto plano (sin $)
+        if "$" not in stored:
+            return password == stored
+        salt, hashed = stored.split("$", 1)
+        return hashlib.sha256((salt + password).encode()).hexdigest() == hashed
 
     # ============================================================
     # VALIDACIONES
     # ============================================================
 
-    def _validate_username(self, username):
-        """Valida username: requerido, único, máx 20 chars."""
+    def _validate_username(self, username: str) -> str:
         if not username or not username.strip():
             raise ValueError("El nombre de usuario es obligatorio.")
         username = username.strip()
         if len(username) > self.MAX_USERNAME:
             raise ValueError(f"El nombre de usuario no puede exceder {self.MAX_USERNAME} caracteres.")
-        # Solo alfanumérico + guión bajo
-        import re
         if not re.match(r'^[a-zA-Z0-9_]+$', username):
             raise ValueError("El nombre de usuario solo puede contener letras, números y guión bajo.")
         return username
 
-    def _validate_password(self, password):
-        """Valida password: requerida, máx 20 chars."""
+    def _validate_password(self, password: str) -> str:
         if not password:
             raise ValueError("La contraseña es obligatoria.")
         if len(password) > self.MAX_PASSWORD:
             raise ValueError(f"La contraseña no puede exceder {self.MAX_PASSWORD} caracteres.")
         return password
 
-    def _check_unique_username(self, username, exclude_id=None):
-        """Verifica que el username no exista ya."""
+    def _check_unique_username(self, username: str, exclude_id: Optional[int] = None):
         conn = self._connect()
         try:
             if exclude_id:
@@ -68,8 +82,8 @@ class UsuarioRepository:
     # CRUD USUARIOS
     # ============================================================
 
-    def create_usuario(self, username, password, nombre="", email="", activo=1):
-        """Crea un nuevo usuario con validaciones."""
+    def create_usuario(self, username: str, password: str, nombre: str = "",
+                       email: str = "", activo: int = 1) -> int:
         username = self._validate_username(username)
         password = self._validate_password(password)
         self._check_unique_username(username)
@@ -79,15 +93,15 @@ class UsuarioRepository:
             cursor = conn.execute(
                 """INSERT INTO usuarios (username, password, nombre, email, activo)
                    VALUES (?, ?, ?, ?, ?)""",
-                (username, password, nombre, email, activo)
+                (username, self._hash_password(password), nombre, email, activo)
             )
             conn.commit()
+            logger.info(f"Usuario '{username}' creado (ID {cursor.lastrowid})")
             return cursor.lastrowid
         finally:
             conn.close()
 
-    def get_usuario(self, id_user):
-        """Obtiene un usuario por ID."""
+    def get_usuario(self, id_user: int):
         conn = self._connect()
         try:
             return conn.execute(
@@ -96,8 +110,7 @@ class UsuarioRepository:
         finally:
             conn.close()
 
-    def get_usuario_by_username(self, username):
-        """Obtiene un usuario por nombre de usuario."""
+    def get_usuario_by_username(self, username: str):
         conn = self._connect()
         try:
             return conn.execute(
@@ -107,10 +120,9 @@ class UsuarioRepository:
             conn.close()
 
     def get_all_usuarios(self):
-        """Lista todos los usuarios con sus roles."""
         conn = self._connect()
         try:
-            rows = conn.execute("""
+            return conn.execute("""
                 SELECT u.*, GROUP_CONCAT(r.nombre, ', ') as roles
                 FROM usuarios u
                 LEFT JOIN usuarios_roles ur ON u.id_user = ur.id_user
@@ -118,13 +130,12 @@ class UsuarioRepository:
                 GROUP BY u.id_user
                 ORDER BY u.username
             """).fetchall()
-            return rows
         finally:
             conn.close()
 
-    def update_usuario(self, id_user, username=None, password=None,
-                       nombre=None, email=None, activo=None):
-        """Actualiza un usuario existente."""
+    def update_usuario(self, id_user: int, username: Optional[str] = None,
+                       password: Optional[str] = None, nombre: Optional[str] = None,
+                       email: Optional[str] = None, activo: Optional[int] = None):
         conn = self._connect()
         try:
             existing = conn.execute(
@@ -145,7 +156,7 @@ class UsuarioRepository:
             if password is not None:
                 password = self._validate_password(password)
                 fields.append("password = ?")
-                values.append(password)
+                values.append(self._hash_password(password))
 
             if nombre is not None:
                 fields.append("nombre = ?")
@@ -160,7 +171,7 @@ class UsuarioRepository:
                 values.append(1 if activo else 0)
 
             if not fields:
-                return  # Nothing to update
+                return
 
             values.append(id_user)
             conn.execute(
@@ -168,11 +179,11 @@ class UsuarioRepository:
                 values
             )
             conn.commit()
+            logger.info(f"Usuario ID {id_user} actualizado")
         finally:
             conn.close()
 
-    def delete_usuario(self, id_user):
-        """Elimina un usuario (no permite eliminar admin)."""
+    def delete_usuario(self, id_user: int):
         conn = self._connect()
         try:
             user = conn.execute(
@@ -185,25 +196,32 @@ class UsuarioRepository:
 
             conn.execute("DELETE FROM usuarios WHERE id_user = ?", (id_user,))
             conn.commit()
+            logger.info(f"Usuario '{user['username']}' eliminado")
         finally:
             conn.close()
 
-    def authenticate(self, username, password):
-        """Autentica un usuario. Retorna el usuario o None."""
+    def authenticate(self, username: str, password: str):
         conn = self._connect()
         try:
-            user = conn.execute(
-                "SELECT * FROM usuarios WHERE username = ? AND password = ? AND activo = 1",
-                (username, password)
+            row = conn.execute(
+                "SELECT * FROM usuarios WHERE username = ? AND activo = 1",
+                (username,)
             ).fetchone()
-            if user:
-                # Actualizar último acceso
+            if row and self._check_password(password, row["password"]):
+                # Migrar contraseña a hash si estaba en texto plano
+                if "$" not in row["password"]:
+                    conn.execute(
+                        "UPDATE usuarios SET password = ? WHERE id_user = ?",
+                        (self._hash_password(password), row["id_user"])
+                    )
                 conn.execute(
                     "UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id_user = ?",
-                    (user["id_user"],)
+                    (row["id_user"],)
                 )
                 conn.commit()
-            return user
+                logger.info(f"Login exitoso: '{username}'")
+                return row
+            return None
         finally:
             conn.close()
 
@@ -212,17 +230,13 @@ class UsuarioRepository:
     # ============================================================
 
     def get_all_roles(self):
-        """Lista todos los roles disponibles."""
         conn = self._connect()
         try:
-            return conn.execute(
-                "SELECT * FROM roles ORDER BY nivel DESC"
-            ).fetchall()
+            return conn.execute("SELECT * FROM roles ORDER BY nivel DESC").fetchall()
         finally:
             conn.close()
 
-    def get_roles_by_usuario(self, id_user):
-        """Obtiene los roles asignados a un usuario."""
+    def get_roles_by_usuario(self, id_user: int):
         conn = self._connect()
         try:
             return conn.execute("""
@@ -234,8 +248,7 @@ class UsuarioRepository:
         finally:
             conn.close()
 
-    def set_usuario_roles(self, id_user, roles_ids):
-        """Reemplaza todos los roles de un usuario."""
+    def set_usuario_roles(self, id_user: int, roles_ids: list):
         conn = self._connect()
         try:
             conn.execute("DELETE FROM usuarios_roles WHERE id_user = ?", (id_user,))
@@ -248,8 +261,7 @@ class UsuarioRepository:
         finally:
             conn.close()
 
-    def create_rol(self, nombre, descripcion="", nivel=0):
-        """Crea un nuevo rol."""
+    def create_rol(self, nombre: str, descripcion: str = "", nivel: int = 0):
         conn = self._connect()
         try:
             cursor = conn.execute(
@@ -265,8 +277,7 @@ class UsuarioRepository:
     # VERIFICACIÓN
     # ============================================================
 
-    def check_constraints(self):
-        """Verifica que no haya duplicados en usuarios (seguridad extra)."""
+    def check_constraints(self) -> list:
         conn = self._connect()
         try:
             dups = conn.execute("""
@@ -275,37 +286,33 @@ class UsuarioRepository:
                 GROUP BY username
                 HAVING cnt > 1
             """).fetchall()
-            if dups:
-                return [dict(d) for d in dups]
-            return []
-        finally:
-            conn.close()
-
-    def check_password_lengths(self):
-        """Verifica que ninguna contraseña exceda 20 caracteres."""
-        conn = self._connect()
-        try:
-            long_pw = conn.execute("""
-                SELECT id_user, username, LENGTH(password) as pw_len
-                FROM usuarios
-                WHERE LENGTH(password) > 20
-            """).fetchall()
-            if long_pw:
-                return [dict(d) for d in long_pw]
-            return []
+            return [dict(d) for d in dups]
         finally:
             conn.close()
 
     # ============================================================
-    # UTILIDAD
+    # INICIALIZACIÓN
     # ============================================================
 
     def ensure_defaults(self):
-        """Asegura que existan los datos por defecto."""
         from .schema import SCHEMA_SQL
         conn = self._connect()
         try:
             conn.executescript(SCHEMA_SQL)
             conn.commit()
+
+            # Migrar contraseñas existentes de texto plano a hash
+            rows = conn.execute(
+                "SELECT id_user, username, password FROM usuarios WHERE password NOT LIKE '%$%'"
+            ).fetchall()
+            for row in rows:
+                hashed = self._hash_password(row["password"])
+                conn.execute(
+                    "UPDATE usuarios SET password = ? WHERE id_user = ?",
+                    (hashed, row["id_user"])
+                )
+            if rows:
+                conn.commit()
+                logger.info(f"Migradas {len(rows)} contraseñas a hash")
         finally:
             conn.close()

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS roles (
 CREATE TABLE IF NOT EXISTS usuarios (
     id_user     INTEGER PRIMARY KEY AUTOINCREMENT,
     username    VARCHAR(20)  NOT NULL UNIQUE,
-    password    VARCHAR(20)  NOT NULL,
+    password    VARCHAR(255) NOT NULL,
     nombre      VARCHAR(100),
     email       VARCHAR(100),
     activo      INTEGER      NOT NULL DEFAULT 1
