@@ -1,134 +1,82 @@
-"""Esquema DDL del ERP Constructora — 4 niveles jerárquicos."""
-
-import sqlite3
-from pathlib import Path
+"""
+Schema SQLite - Módulo Usuarios y Roles
+ERP Constructora - Diseño futurista
+"""
 
 SCHEMA_SQL = """
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
 -- ============================================================
--- Clientes
+-- ROLES
 -- ============================================================
-CREATE TABLE IF NOT EXISTS clientes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre      TEXT    NOT NULL,
-    ruc         TEXT,
-    telefono    TEXT,
-    email       TEXT,
-    direccion   TEXT,
-    created_at  TEXT    DEFAULT (datetime('now','localtime')),
-    updated_at  TEXT    DEFAULT (datetime('now','localtime'))
+CREATE TABLE IF NOT EXISTS roles (
+    id_rol      INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre      VARCHAR(50)  NOT NULL UNIQUE,
+    descripcion VARCHAR(200),
+    nivel       INTEGER      NOT NULL DEFAULT 0
+        CHECK (nivel BETWEEN 0 AND 100),
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
--- Obras
+-- USUARIOS
+-- - username: único, máx 20 caracteres
+-- - password: máx 20 caracteres (para esta versión)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS obras (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo          TEXT    NOT NULL UNIQUE,
-    nombre          TEXT    NOT NULL,
-    id_cliente      INTEGER REFERENCES clientes(id),
-    direccion       TEXT,
-    coordenadas_utm TEXT,
-    dimension_area  TEXT,
-    responsable     TEXT,
-    patente_prof    TEXT,
-    estado          TEXT    NOT NULL DEFAULT 'activo'
-                    CHECK (estado IN ('activo','en_ejecucion','finalizado','cancelado')),
-    moneda          TEXT    NOT NULL DEFAULT 'GS'
-                    CHECK (moneda IN ('GS','USD')),
-    created_at      TEXT    DEFAULT (datetime('now','localtime')),
-    updated_at      TEXT    DEFAULT (datetime('now','localtime'))
+CREATE TABLE IF NOT EXISTS usuarios (
+    id_user     INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    VARCHAR(20)  NOT NULL UNIQUE,
+    password    VARCHAR(20)  NOT NULL,
+    nombre      VARCHAR(100),
+    email       VARCHAR(100),
+    activo      INTEGER      NOT NULL DEFAULT 1
+        CHECK (activo IN (0, 1)),
+    ultimo_acceso TIMESTAMP,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Índice único para búsqueda rápida
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_username ON usuarios(username);
+
+-- ============================================================
+-- USUARIOS_ROLES (relación muchos a muchos)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS usuarios_roles (
+    id_user     INTEGER NOT NULL,
+    id_rol      INTEGER NOT NULL,
+    PRIMARY KEY (id_user, id_rol),
+    FOREIGN KEY (id_user) REFERENCES usuarios(id_user) ON DELETE CASCADE,
+    FOREIGN KEY (id_rol)  REFERENCES roles(id_rol)     ON DELETE CASCADE
 );
 
 -- ============================================================
--- Rubros (N1: 1.00, 2.00, 3.00...)
+-- Datos por defecto
 -- ============================================================
-CREATE TABLE IF NOT EXISTS rubros (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo      TEXT    NOT NULL UNIQUE,
-    nombre      TEXT    NOT NULL,
-    descripcion TEXT,
-    orden       INTEGER NOT NULL DEFAULT 0
-);
+-- Roles base
+INSERT OR IGNORE INTO roles (nombre, descripcion, nivel) VALUES
+    ('Administrador',   'Acceso total al sistema. Gestiona usuarios, roles y configuración.', 100),
+    ('Gerente',         'Visión general de obras, reportes y aprobación de presupuestos.',      80),
+    ('Supervisor',      'Gestiona obras, asigna tareas y supervisa avance.',                    60),
+    ('Operador',        'Carga datos, registra avance de obra y emite comprobantes.',           40),
+    ('Lector',          'Solo consulta informes y presupuestos, sin modificar.',                 20),
+    ('Auditor',         'Acceso de solo lectura con trazabilidad de cambios.',                   10);
 
--- ============================================================
--- SubRubros (N2: 1.01, 2.01, 8.01...)
--- ============================================================
-CREATE TABLE IF NOT EXISTS subrubros (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo      TEXT    NOT NULL,
-    nombre      TEXT    NOT NULL,
-    descripcion TEXT,
-    id_rubro    INTEGER NOT NULL REFERENCES rubros(id),
-    orden       INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(codigo, id_rubro)
-);
+-- Usuario admin por defecto
+INSERT OR IGNORE INTO usuarios (id_user, username, password, nombre, activo) VALUES
+    (1, 'admin', 'admin', 'Administrador del Sistema', 1);
 
--- ============================================================
--- Items (N3: 1.01.01, 2.01.02, 8.01.01...)
--- ============================================================
-CREATE TABLE IF NOT EXISTS items (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo          TEXT    NOT NULL UNIQUE,
-    nombre          TEXT    NOT NULL,
-    unidad          TEXT    NOT NULL DEFAULT 'un'
-                    CHECK (unidad IN ('m2','m3','m²','m³','kg','glb','ml','un','unid.','m','lt','h')),
-    id_subrubro     INTEGER REFERENCES subrubros(id),
-    id_rubro        INTEGER NOT NULL REFERENCES rubros(id),
-    descripcion_ext TEXT,
-    created_at      TEXT    DEFAULT (datetime('now','localtime'))
-);
-
--- ============================================================
--- SubItems (N4: 1.01.01.01, 8.01.01.01...)
--- ============================================================
-CREATE TABLE IF NOT EXISTS subitems (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo          TEXT    NOT NULL UNIQUE,
-    nombre          TEXT    NOT NULL,
-    unidad          TEXT    NOT NULL DEFAULT 'un'
-                    CHECK (unidad IN ('m2','m3','m²','m³','kg','glb','ml','un','unid.','m','lt','h')),
-    id_item         INTEGER NOT NULL REFERENCES items(id),
-    descripcion_ext TEXT,
-    created_at      TEXT    DEFAULT (datetime('now','localtime'))
-);
-
--- ============================================================
--- Presupuesto_Detalle (Tabla transaccional)
--- ============================================================
-CREATE TABLE IF NOT EXISTS presupuesto_detalle (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_obra             INTEGER NOT NULL REFERENCES obras(id),
-    id_item             INTEGER REFERENCES items(id),
-    id_subitem          INTEGER REFERENCES subitems(id),
-    cantidad            REAL    NOT NULL DEFAULT 1.0
-                            CHECK (cantidad > 0),
-    precio_unit_mat     REAL    NOT NULL DEFAULT 0.0
-                            CHECK (precio_unit_mat >= 0),
-    precio_unit_mo      REAL    NOT NULL DEFAULT 0.0
-                            CHECK (precio_unit_mo >= 0),
-    descripcion_linea   TEXT,
-    created_at          TEXT    DEFAULT (datetime('now','localtime')),
-    updated_at          TEXT    DEFAULT (datetime('now','localtime')),
-    CHECK (
-        (id_item IS NOT NULL AND id_subitem IS NULL) OR
-        (id_item IS NULL AND id_subitem IS NOT NULL)
-    )
-);
-
--- Índices para performance
-CREATE INDEX IF NOT EXISTS idx_detalle_obra    ON presupuesto_detalle(id_obra);
-CREATE INDEX IF NOT EXISTS idx_items_rubro     ON items(id_rubro);
-CREATE INDEX IF NOT EXISTS idx_items_subrubro  ON items(id_subrubro);
-CREATE INDEX IF NOT EXISTS idx_subitems_item   ON subitems(id_item);
+-- Asignar rol Admin al usuario admin
+INSERT OR IGNORE INTO usuarios_roles (id_user, id_rol) VALUES
+    (1, (SELECT id_rol FROM roles WHERE nombre = 'Administrador'));
 """
 
 
-def init_database(db_path: str | Path) -> sqlite3.Connection:
-    """Inicializa BD y crea tablas si no existen. Retorna conexión."""
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
+def init_database(db_path):
+    """Inicializa la base de datos con el schema."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
-    return conn
+    conn.close()
+    return db_path

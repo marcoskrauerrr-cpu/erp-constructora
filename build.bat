@@ -1,10 +1,10 @@
 @echo off
-REM ============================================================
-REM Build Script — ERP Constructora para Windows
-REM Requiere: Python 3.11+ y PyInstaller
-REM ============================================================
+REM ============================================
+REM BUILD SCRIPT - ERP Constructora
+REM Genera .exe instalable para Windows
+REM ============================================
 echo ========================================
-echo  ERP Constructora - Build Windows
+echo  ERP Constructora - Build
 echo ========================================
 echo.
 
@@ -16,34 +16,38 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Crear virtualenv si no existe
+REM Crear entorno virtual
+echo [1/4] Creando entorno virtual...
 if not exist venv (
-    echo [1/4] Creando entorno virtual...
     python -m venv venv
 )
 
-echo [2/4] Activando entorno virtual...
+REM Activar entorno
 call venv\Scripts\activate.bat
 
-echo [3/4] Instalando dependencias...
+REM Instalar dependencias
+echo [2/4] Instalando dependencias...
 pip install -r requirements.txt
 pip install pyinstaller
 
-echo [4/4] Compilando ejecutable...
-pyinstaller ^
-    --name "ERP Constructora" ^
+REM Ejecutar PyInstaller
+echo [3/4] Compilando ejecutable...
+pyinstaller --name "ERP Constructora" ^
     --onefile ^
     --windowed ^
-    --add-data "src;src" ^
-    --hidden-import "openpyxl" ^
-    --hidden-import "dateutil" ^
-    --distpath "dist" ^
-    --workpath "build" ^
-    --icon "NONE" ^
+    --icon build\icon.ico ^
+    --add-data "data;data" ^
+    --noconfirm ^
     main.py
+
+REM Copiar base de datos de ejemplo
+echo [4/4] Preparando distribucion...
+if not exist dist\data mkdir dist\data
+copy data\erp_constructora.db dist\data\ 2>nul
 
 echo.
 echo ========================================
-echo  LISTO! Ejecutable en: dist\ERP Constructora.exe
+echo  LISTO!
+echo  Ejecutable: dist\ERP Constructora.exe
 echo ========================================
 pause

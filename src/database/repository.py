@@ -1,158 +1,311 @@
-"""Repositorio de base de datos — capa de acceso a datos."""
+"""
+Repository - Capa de acceso a datos para Usuarios y Roles
+"""
 
 import sqlite3
-from pathlib import Path
-from typing import Any
-
-from src.database.schema import init_database, SCHEMA_SQL
 
 
-class Database:
-    """Maneja la conexión y operaciones básicas de BD."""
+class UsuarioRepository:
+    """CRUD de usuarios con validaciones de unicidad y longitud."""
 
-    def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
-        self.conn: sqlite3.Connection | None = None
+    # Constantes de validación
+    MAX_USERNAME = 20
+    MAX_PASSWORD = 20
 
-    def connect(self) -> sqlite3.Connection:
-        """Abre conexión e inicializa esquema si es primera vez."""
-        if self.conn is None:
-            self.conn = init_database(self.db_path)
-            self.conn.row_factory = sqlite3.Row
-        return self.conn
+    def __init__(self, db_path):
+        self.db_path = db_path
 
-    def close(self):
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    # ============================================================
+    # VALIDACIONES
+    # ============================================================
+
+    def _validate_username(self, username):
+        """Valida username: requerido, único, máx 20 chars."""
+        if not username or not username.strip():
+            raise ValueError("El nombre de usuario es obligatorio.")
+        username = username.strip()
+        if len(username) > self.MAX_USERNAME:
+            raise ValueError(f"El nombre de usuario no puede exceder {self.MAX_USERNAME} caracteres.")
+        # Solo alfanumérico + guión bajo
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+            raise ValueError("El nombre de usuario solo puede contener letras, números y guión bajo.")
+        return username
+
+    def _validate_password(self, password):
+        """Valida password: requerida, máx 20 chars."""
+        if not password:
+            raise ValueError("La contraseña es obligatoria.")
+        if len(password) > self.MAX_PASSWORD:
+            raise ValueError(f"La contraseña no puede exceder {self.MAX_PASSWORD} caracteres.")
+        return password
+
+    def _check_unique_username(self, username, exclude_id=None):
+        """Verifica que el username no exista ya."""
+        conn = self._connect()
+        try:
+            if exclude_id:
+                row = conn.execute(
+                    "SELECT 1 FROM usuarios WHERE username = ? AND id_user != ?",
+                    (username, exclude_id)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT 1 FROM usuarios WHERE username = ?", (username,)
+                ).fetchone()
+            if row:
+                raise ValueError(f"El usuario '{username}' ya existe. Debe ser único.")
+        finally:
+            conn.close()
+
+    # ============================================================
+    # CRUD USUARIOS
+    # ============================================================
+
+    def create_usuario(self, username, password, nombre="", email="", activo=1):
+        """Crea un nuevo usuario con validaciones."""
+        username = self._validate_username(username)
+        password = self._validate_password(password)
+        self._check_unique_username(username)
+
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """INSERT INTO usuarios (username, password, nombre, email, activo)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (username, password, nombre, email, activo)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def get_usuario(self, id_user):
+        """Obtiene un usuario por ID."""
+        conn = self._connect()
+        try:
+            return conn.execute(
+                "SELECT * FROM usuarios WHERE id_user = ?", (id_user,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+    def get_usuario_by_username(self, username):
+        """Obtiene un usuario por nombre de usuario."""
+        conn = self._connect()
+        try:
+            return conn.execute(
+                "SELECT * FROM usuarios WHERE username = ?", (username,)
+            ).fetchone()
+        finally:
+            conn.close()
+
+    def get_all_usuarios(self):
+        """Lista todos los usuarios con sus roles."""
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT u.*, GROUP_CONCAT(r.nombre, ', ') as roles
+                FROM usuarios u
+                LEFT JOIN usuarios_roles ur ON u.id_user = ur.id_user
+                LEFT JOIN roles r ON ur.id_rol = r.id_rol
+                GROUP BY u.id_user
+                ORDER BY u.username
+            """).fetchall()
+            return rows
+        finally:
+            conn.close()
+
+    def update_usuario(self, id_user, username=None, password=None,
+                       nombre=None, email=None, activo=None):
+        """Actualiza un usuario existente."""
+        conn = self._connect()
+        try:
+            existing = conn.execute(
+                "SELECT * FROM usuarios WHERE id_user = ?", (id_user,)
+            ).fetchone()
+            if not existing:
+                raise ValueError(f"Usuario ID {id_user} no encontrado.")
+
+            fields = []
+            values = []
+
+            if username is not None:
+                username = self._validate_username(username)
+                self._check_unique_username(username, exclude_id=id_user)
+                fields.append("username = ?")
+                values.append(username)
+
+            if password is not None:
+                password = self._validate_password(password)
+                fields.append("password = ?")
+                values.append(password)
+
+            if nombre is not None:
+                fields.append("nombre = ?")
+                values.append(nombre)
+
+            if email is not None:
+                fields.append("email = ?")
+                values.append(email)
+
+            if activo is not None:
+                fields.append("activo = ?")
+                values.append(1 if activo else 0)
+
+            if not fields:
+                return  # Nothing to update
+
+            values.append(id_user)
+            conn.execute(
+                f"UPDATE usuarios SET {', '.join(fields)} WHERE id_user = ?",
+                values
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_usuario(self, id_user):
+        """Elimina un usuario (no permite eliminar admin)."""
+        conn = self._connect()
+        try:
+            user = conn.execute(
+                "SELECT username FROM usuarios WHERE id_user = ?", (id_user,)
+            ).fetchone()
+            if not user:
+                raise ValueError("Usuario no encontrado.")
+            if user["username"] == "admin":
+                raise ValueError("No se puede eliminar el usuario administrador por defecto.")
+
+            conn.execute("DELETE FROM usuarios WHERE id_user = ?", (id_user,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def authenticate(self, username, password):
+        """Autentica un usuario. Retorna el usuario o None."""
+        conn = self._connect()
+        try:
+            user = conn.execute(
+                "SELECT * FROM usuarios WHERE username = ? AND password = ? AND activo = 1",
+                (username, password)
+            ).fetchone()
+            if user:
+                # Actualizar último acceso
+                conn.execute(
+                    "UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id_user = ?",
+                    (user["id_user"],)
+                )
+                conn.commit()
+            return user
+        finally:
+            conn.close()
+
+    # ============================================================
+    # ROLES
+    # ============================================================
+
+    def get_all_roles(self):
+        """Lista todos los roles disponibles."""
+        conn = self._connect()
+        try:
+            return conn.execute(
+                "SELECT * FROM roles ORDER BY nivel DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+
+    def get_roles_by_usuario(self, id_user):
+        """Obtiene los roles asignados a un usuario."""
+        conn = self._connect()
+        try:
+            return conn.execute("""
+                SELECT r.* FROM roles r
+                JOIN usuarios_roles ur ON r.id_rol = ur.id_rol
+                WHERE ur.id_user = ?
+                ORDER BY r.nivel DESC
+            """, (id_user,)).fetchall()
+        finally:
+            conn.close()
+
+    def set_usuario_roles(self, id_user, roles_ids):
+        """Reemplaza todos los roles de un usuario."""
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM usuarios_roles WHERE id_user = ?", (id_user,))
+            for rid in roles_ids:
+                conn.execute(
+                    "INSERT INTO usuarios_roles (id_user, id_rol) VALUES (?, ?)",
+                    (id_user, rid)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def create_rol(self, nombre, descripcion="", nivel=0):
+        """Crea un nuevo rol."""
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "INSERT INTO roles (nombre, descripcion, nivel) VALUES (?, ?, ?)",
+                (nombre, descripcion, nivel)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    # ============================================================
+    # VERIFICACIÓN
+    # ============================================================
+
+    def check_constraints(self):
+        """Verifica que no haya duplicados en usuarios (seguridad extra)."""
+        conn = self._connect()
+        try:
+            dups = conn.execute("""
+                SELECT username, COUNT(*) as cnt
+                FROM usuarios
+                GROUP BY username
+                HAVING cnt > 1
+            """).fetchall()
+            if dups:
+                return [dict(d) for d in dups]
+            return []
+        finally:
+            conn.close()
+
+    def check_password_lengths(self):
+        """Verifica que ninguna contraseña exceda 20 caracteres."""
+        conn = self._connect()
+        try:
+            long_pw = conn.execute("""
+                SELECT id_user, username, LENGTH(password) as pw_len
+                FROM usuarios
+                WHERE LENGTH(password) > 20
+            """).fetchall()
+            if long_pw:
+                return [dict(d) for d in long_pw]
+            return []
+        finally:
+            conn.close()
+
+    # ============================================================
+    # UTILIDAD
+    # ============================================================
 
     def ensure_defaults(self):
-        """Crea datos por defecto si no existen."""
-        # Tabla de usuarios
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre      TEXT NOT NULL UNIQUE,
-                password    TEXT NOT NULL,
-                rol         TEXT NOT NULL DEFAULT 'admin',
-                created_at  TEXT DEFAULT (datetime('now','localtime'))
-            );
-        """)
-        # Usuario admin por defecto
-        cur = self.conn.execute("SELECT COUNT(*) FROM usuarios")
-        if cur.fetchone()[0] == 0:
-            self.conn.execute(
-                "INSERT INTO usuarios (nombre, password, rol) VALUES (?, ?, ?)",
-                ("admin", "admin", "admin")
-            )
-        self.conn.commit()
-
-    # ── Genéricos CRUD ──────────────────────────────────────────────────────
-
-    def fetch_all(self, table: str, order_by: str = "id") -> list[dict]:
-        cur = self.conn.execute(f"SELECT * FROM {table} ORDER BY {order_by}")
-        return [dict(r) for r in cur.fetchall()]
-
-    def fetch_one(self, table: str, id_val: int) -> dict | None:
-        cur = self.conn.execute(f"SELECT * FROM {table} WHERE id = ?", (id_val,))
-        row = cur.fetchone()
-        return dict(row) if row else None
-
-    def insert(self, table: str, data: dict) -> int:
-        cols = ", ".join(data.keys())
-        placeholders = ", ".join("?" for _ in data)
-        cur = self.conn.execute(
-            f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
-            tuple(data.values()),
-        )
-        self.conn.commit()
-        return cur.lastrowid
-
-    def update(self, table: str, id_val: int, data: dict):
-        sets = ", ".join(f"{k} = ?" for k in data.keys())
-        self.conn.execute(
-            f"UPDATE {table} SET {sets} WHERE id = ?",
-            tuple(data.values()) + (id_val,),
-        )
-        self.conn.commit()
-
-    def delete(self, table: str, id_val: int):
-        self.conn.execute(f"DELETE FROM {table} WHERE id = ?", (id_val,))
-        self.conn.commit()
-
-    # ── Consultas de Presupuesto ────────────────────────────────────────────
-
-    def get_detalle_obra(self, id_obra: int) -> list[dict]:
-        """Retorna todas las líneas del detalle con códigos y nombres."""
-        query = """
-            SELECT
-                pd.id,
-                pd.id_item,
-                pd.id_subitem,
-                pd.cantidad,
-                pd.precio_unit_mat,
-                pd.precio_unit_mo,
-                pd.descripcion_linea,
-                (pd.cantidad * (pd.precio_unit_mat + pd.precio_unit_mo)) AS subtotal,
-                COALESCE(i.codigo, si.codigo) AS codigo_item,
-                COALESCE(i.nombre, si.nombre) AS nombre_item,
-                COALESCE(i.unidad, si.unidad) AS unidad,
-                COALESCE(i.id_rubro, sii.id_rubro) AS id_rubro,
-                COALESCE(i.id_subrubro, sii.id_subrubro) AS id_subrubro
-            FROM presupuesto_detalle pd
-            LEFT JOIN items i     ON pd.id_item    = i.id
-            LEFT JOIN subitems si ON pd.id_subitem = si.id
-            LEFT JOIN items sii   ON si.id_item    = sii.id
-            WHERE pd.id_obra = ?
-            ORDER BY codigo_item
-        """
-        cur = self.conn.execute(query, (id_obra,))
-        return [dict(r) for r in cur.fetchall()]
-
-    def get_subtotales_por_rubro(self, id_obra: int) -> list[dict]:
-        query = """
-            SELECT
-                r.id,
-                r.codigo,
-                r.nombre,
-                ROUND(SUM(pd.cantidad * (pd.precio_unit_mat + pd.precio_unit_mo)), 2) AS subtotal,
-                COUNT(pd.id) AS items_count
-            FROM presupuesto_detalle pd
-            LEFT JOIN items i       ON pd.id_item    = i.id
-            LEFT JOIN subitems si   ON pd.id_subitem = si.id
-            LEFT JOIN items sii     ON si.id_item    = sii.id
-            JOIN rubros r           ON r.id = COALESCE(i.id_rubro, sii.id_rubro)
-            WHERE pd.id_obra = ?
-            GROUP BY r.id, r.codigo, r.nombre
-            ORDER BY r.orden
-        """
-        cur = self.conn.execute(query, (id_obra,))
-        return [dict(r) for r in cur.fetchall()]
-
-    def get_subtotales_por_subrubro(self, id_obra: int) -> list[dict]:
-        query = """
-            SELECT
-                sr.id,
-                sr.codigo,
-                sr.nombre,
-                ROUND(SUM(pd.cantidad * (pd.precio_unit_mat + pd.precio_unit_mo)), 2) AS subtotal,
-                COUNT(pd.id) AS items_count
-            FROM presupuesto_detalle pd
-            LEFT JOIN items i       ON pd.id_item    = i.id
-            LEFT JOIN subitems si   ON pd.id_subitem = si.id
-            LEFT JOIN items sii     ON si.id_item    = sii.id
-            JOIN subrubros sr       ON sr.id = COALESCE(i.id_subrubro, sii.id_subrubro)
-            WHERE pd.id_obra = ?
-            GROUP BY sr.id, sr.codigo, sr.nombre
-            ORDER BY sr.codigo
-        """
-        cur = self.conn.execute(query, (id_obra,))
-        return [dict(r) for r in cur.fetchall()]
-
-    def get_total_presupuesto(self, id_obra: int) -> float:
-        cur = self.conn.execute(
-            "SELECT ROUND(SUM(cantidad * (precio_unit_mat + precio_unit_mo)), 2) "
-            "FROM presupuesto_detalle WHERE id_obra = ?",
-            (id_obra,),
-        )
-        return cur.fetchone()[0] or 0.0
+        """Asegura que existan los datos por defecto."""
+        from .schema import SCHEMA_SQL
+        conn = self._connect()
+        try:
+            conn.executescript(SCHEMA_SQL)
+            conn.commit()
+        finally:
+            conn.close()

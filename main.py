@@ -1,330 +1,244 @@
 #!/usr/bin/env python3
 """
-ERP Constructora — Sistema de Gestión para Empresas Constructoras
-Punto de entrada principal.
+ERP Constructora - Main Entry Point
+Módulo de Usuarios y Roles con autenticación
 """
 
 import sys
-from pathlib import Path
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QTabWidget,
-    QPushButton, QLabel, QDialog, QLineEdit, QFormLayout, QHBoxLayout,
-    QMessageBox,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QStackedWidget, QMessageBox, QStatusBar
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QPixmap
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "erp_constructora.db"
+from src.database.repository import UsuarioRepository
+from src.gui.login import LoginDialog
+from src.gui.admin_panel import AdminPanel
+from src.gui.styles.futuristic_style import apply_style
+from src.core.launcher import CoreLauncher
 
-from src.database.repository import Database
-
-from src.gui.tabs.obras_tab import ObrasTab
-from src.gui.tabs.clientes_tab import ClientesTab
-from src.gui.tabs.catalogo_tab import CatalogoTab
-from src.gui.tabs.presupuesto_tab import PresupuestoTab
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(APP_DIR, "data", "erp_constructora.db")
 
 
-# ── Tema oscuro premium ──────────────────────────────────────────────
-DARK_STYLE = """
-QMainWindow { background-color: #0f0f1a; }
-QWidget {
-    background-color: #1a1a2e;
-    color: #e0e0f0;
-    font-family: 'Segoe UI', 'Arial', sans-serif;
-}
-QTabWidget::pane {
-    background-color: #1a1a2e;
-    border: 1px solid #2a2a4a;
-    border-radius: 8px;
-    padding: 4px;
-}
-QTabBar::tab {
-    background-color: #252545;
-    color: #8888aa;
-    padding: 12px 28px;
-    margin: 2px;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-}
-QTabBar::tab:selected {
-    background-color: #3a3a6a;
-    color: #ffffff;
-    font-weight: bold;
-    border-bottom: 2px solid #6c63ff;
-}
-QTabBar::tab:hover:!selected {
-    background-color: #303050;
-    color: #ccccdd;
-}
-QPushButton {
-    background-color: #6c63ff;
-    color: #ffffff;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 24px;
-    font-size: 13px;
-    font-weight: 600;
-}
-QPushButton:hover {
-    background-color: #7c73ff;
-}
-QPushButton:pressed {
-    background-color: #5a52e0;
-}
-QPushButton#btn_danger {
-    background-color: #e74c3c;
-}
-QPushButton#btn_danger:hover {
-    background-color: #ff5a4a;
-}
-QTableWidget {
-    background-color: #1a1a2e;
-    alternate-background-color: #16162a;
-    color: #e0e0f0;
-    gridline-color: #2a2a4a;
-    font-size: 13px;
-    border-radius: 6px;
-    border: 1px solid #2a2a4a;
-}
-QHeaderView::section {
-    background-color: #252545;
-    color: #e0e0f0;
-    padding: 10px;
-    font-weight: bold;
-    border: 1px solid #2a2a4a;
-}
-QTableWidget::item:selected {
-    background-color: #3a3a6a;
-    color: #ffffff;
-}
-QLineEdit, QComboBox, QDoubleSpinBox, QDateEdit {
-    background-color: #252545;
-    color: #e0e0f0;
-    border: 1px solid #3a3a6a;
-    border-radius: 6px;
-    padding: 8px;
-    font-size: 13px;
-}
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
-    border: 2px solid #6c63ff;
-}
-QComboBox QAbstractItemView {
-    background-color: #1a1a2e;
-    color: #e0e0f0;
-    border: 1px solid #3a3a6a;
-}
-QLabel {
-    color: #e0e0f0;
-}
-QGroupBox {
-    color: #e0e0f0;
-    font-size: 14px;
-    font-weight: 600;
-    border: 1px solid #2a2a4a;
-    border-radius: 8px;
-    margin-top: 12px;
-    padding-top: 18px;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 8px;
-    color: #6c63ff;
-}
-QScrollBar:vertical {
-    background-color: #1a1a2e;
-    width: 12px;
-    border: none;
-}
-QScrollBar::handle:vertical {
-    background-color: #3a3a6a;
-    border-radius: 6px;
-    min-height: 30px;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
-}
-"""
+class SidebarButton(QPushButton):
+    """Botón de navegación en la sidebar."""
 
-
-# ── Login mejorado ────────────────────────────────────────────────────
-class LoginDialog(QDialog):
-    def __init__(self, db, parent=None):
-        super().__init__(parent)
-        self.db = db
-        self.setWindowTitle("ERP Constructora — Ingreso")
-        self.setFixedSize(420, 320)
+    def __init__(self, text, icon=""):
+        super().__init__(f"  {icon}  {text}" if icon else text)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(38)
+        self.setCheckable(True)
         self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #0f0f1a, stop:1 #1a1a2e
-                );
-            }
-            QLabel { color: #e0e0f0; }
-            QLineEdit {
-                background-color: #252545;
-                color: #e0e0f0;
-                border: 2px solid #3a3a6a;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #6c63ff;
-            }
             QPushButton {
-                background-color: #6c63ff;
-                color: #ffffff;
-                border: none;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 15px;
-                font-weight: bold;
+                text-align: left; padding: 8px 16px;
+                font-size: 13px; border-radius: 6px;
+                background: transparent; color: #8b949e;
+                border: none; margin: 1px 0;
             }
             QPushButton:hover {
-                background-color: #7c73ff;
+                background: #21262d; color: #e1e4e8;
+            }
+            QPushButton:checked {
+                background: #1f3a5f; color: #58a6ff;
             }
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
 
-        # Logo
-        lbl_logo = QLabel("🏗️")
-        lbl_logo.setAlignment(Qt.AlignCenter)
-        lf = QFont()
-        lf.setPointSize(40)
-        lbl_logo.setFont(lf)
+class DashboardMain(QMainWindow):
+    """Dashboard principal del ERP."""
 
-        # Título
-        title = QLabel("ERP Constructora")
-        title.setAlignment(Qt.AlignCenter)
-        tf = QFont()
-        tf.setPointSize(20)
-        tf.setBold(True)
-        title.setFont(tf)
-        title.setStyleSheet("color: #6c63ff;")
-
-        # Subtítulo
-        subtitle = QLabel("Sistema de Gestión para Constructoras")
-        subtitle.setAlignment(Qt.AlignCenter)
-        sf = QFont()
-        sf.setPointSize(11)
-        subtitle.setFont(sf)
-        subtitle.setStyleSheet("color: #8888aa;")
-
-        layout.addStretch(1)
-        layout.addWidget(lbl_logo)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addSpacing(20)
-
-        # Formulario de login
-        form = QFormLayout()
-        form.setSpacing(10)
-
-        self.txt_usuario = QLineEdit()
-        self.txt_usuario.setPlaceholderText("admin")
-        form.addRow("👤 Usuario:", self.txt_usuario)
-
-        self.txt_password = QLineEdit()
-        self.txt_password.setPlaceholderText("admin")
-        self.txt_password.setEchoMode(QLineEdit.Password)
-        self.txt_password.returnPressed.connect(self._do_login)
-        form.addRow("🔒 Contraseña:", self.txt_password)
-
-        layout.addLayout(form)
-        layout.addSpacing(10)
-
-        self.btn_ingresar = QPushButton("🚀 Ingresar")
-        self.btn_ingresar.setMinimumHeight(45)
-        self.btn_ingresar.clicked.connect(self._do_login)
-        layout.addWidget(self.btn_ingresar)
-
-        layout.addStretch(1)
-
-    def _do_login(self):
-        usuario = self.txt_usuario.text().strip()
-        password = self.txt_password.text().strip()
-
-        # Usuario por defecto
-        if usuario == "admin" and password == "admin":
-            self.accept()
-            return
-
-        # Verificar en BD
-        cur = self.db.conn.execute(
-            "SELECT * FROM usuarios WHERE nombre = ? AND password = ?",
-            (usuario, password)
-        )
-        user = cur.fetchone()
-        if user:
-            self.accept()
-        else:
-            QMessageBox.warning(
-                self, "Acceso denegado",
-                "Usuario o contraseña incorrectos.\n\n"
-                "Usuario por defecto: admin / admin"
-            )
-
-
-# ── Dashboard ────────────────────────────────────────────────────────
-class MainDashboard(QMainWindow):
-    def __init__(self, db: Database):
+    def __init__(self, db_repo, user):
         super().__init__()
-        self.db = db
-        self.setWindowTitle("ERP Constructora — Dashboard")
-        self.resize(1300, 820)
+        self.db = db_repo
+        self.user = user
+        self.core = CoreLauncher(db_repo, user)
+        self.pages = {}
 
-        # Centrar en pantalla
-        screen = QApplication.primaryScreen().geometry()
-        x = (screen.width() - 1300) // 2
-        y = (screen.height() - 820) // 2
-        self.move(x, y)
+        self.core.register_module("admin_usuarios", AdminPanel, min_level=100)
+
+        self._setup_ui()
+        self._show_page("inicio")
+
+    def _setup_ui(self):
+        self.setWindowTitle("ERP Constructora")
+        self.setMinimumSize(1100, 680)
 
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(8, 8, 8, 8)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(ObrasTab(db),    "📋 Obras")
-        self.tabs.addTab(ClientesTab(db), "👥 Clientes")
-        self.tabs.addTab(CatalogoTab(db), "📦 Catálogo")
-        self.tabs.addTab(PresupuestoTab(db), "💰 Presupuesto")
+        # Top bar
+        topbar = QWidget()
+        topbar.setFixedHeight(52)
+        topbar.setStyleSheet("background-color: #161b22; border-bottom: 1px solid #30363d;")
+        topbar_layout = QHBoxLayout(topbar)
+        topbar_layout.setContentsMargins(20, 0, 20, 0)
 
-        layout.addWidget(self.tabs)
+        logo = QLabel("ERP Constructora")
+        logo.setStyleSheet("font-size: 15px; font-weight: 600; color: #e1e4e8; background: transparent;")
+        topbar_layout.addWidget(logo)
+
+        topbar_layout.addStretch()
+
+        info = self.core.get_user_info()
+        roles_str = ", ".join(info['roles'][:2])
+        user_tag = QLabel(f"{info['nombre'] or info['username']}  ·  {roles_str}")
+        user_tag.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+        topbar_layout.addWidget(user_tag)
+
+        logout_btn = QPushButton("Salir")
+        logout_btn.setObjectName("btnSecondary")
+        logout_btn.setFixedWidth(80)
+        logout_btn.setFixedHeight(32)
+        logout_btn.setCursor(Qt.PointingHandCursor)
+        logout_btn.clicked.connect(self._confirm_logout)
+        topbar_layout.addWidget(logout_btn)
+
+        main_layout.addWidget(topbar)
+
+        # Cuerpo
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        # Sidebar
+        sidebar = QWidget()
+        sidebar.setFixedWidth(200)
+        sidebar.setStyleSheet("background-color: #0f1117; border-right: 1px solid #21262d;")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 12, 8, 12)
+        sidebar_layout.setSpacing(2)
+
+        sec_label = QLabel("MÓDULOS")
+        sec_label.setStyleSheet("font-size: 10px; color: #484f58; "
+                                "letter-spacing: 1px; padding: 8px 12px 4px; "
+                                "background: transparent;")
+        sidebar_layout.addWidget(sec_label)
+
+        self.nav_btns = {}
+        navs = [
+            ("inicio", "🏠", "Inicio"),
+            ("usuarios", "👥", "Usuarios"),
+        ]
+        for key, icon, label in navs:
+            btn = SidebarButton(label, icon)
+            btn.clicked.connect(lambda checked, k=key: self._show_page(k))
+            sidebar_layout.addWidget(btn)
+            self.nav_btns[key] = btn
+
+        sidebar_layout.addStretch()
+
+        ver = QLabel("v1.0.0")
+        ver.setStyleSheet("font-size: 10px; color: #484f58; padding: 8px 12px; background: transparent;")
+        sidebar_layout.addWidget(ver)
+
+        body.addWidget(sidebar)
+
+        # Stacked content
+        self.stack = QStackedWidget()
+        body.addWidget(self.stack, 1)
+
+        main_layout.addLayout(body)
+
+        # Status bar
+        sb = QStatusBar()
+        sb.setStyleSheet("background: #161b22; color: #8b949e; "
+                         "border-top: 1px solid #30363d; font-size: 11px;")
+        self.setStatusBar(sb)
+        sb.showMessage("Sistema listo  |  Usuario autenticado")
+
+        # Welcome page
+        welcome = QWidget()
+        wl = QVBoxLayout(welcome)
+        wl.setContentsMargins(40, 60, 40, 60)
+        wl.setAlignment(Qt.AlignCenter)
+
+        wt = QLabel("Bienvenido a ERP Constructora")
+        wt.setStyleSheet("font-size: 26px; font-weight: 600; color: #e1e4e8; background: transparent;")
+        wt.setAlignment(Qt.AlignCenter)
+        wl.addWidget(wt)
+
+        ws = QLabel(f"Iniciaste sesión como  {info['nombre'] or info['username']}")
+        ws.setStyleSheet("font-size: 14px; color: #8b949e; margin: 8px 0 30px; background: transparent;")
+        ws.setAlignment(Qt.AlignCenter)
+        wl.addWidget(ws)
+
+        # Info box
+        box = QWidget()
+        box.setStyleSheet("background: #161b22; border: 1px solid #30363d; "
+                          "border-radius: 8px; max-width: 500px;")
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(20, 20, 20, 20)
+
+        bt = QLabel("Módulos disponibles")
+        bt.setStyleSheet("font-size: 14px; font-weight: 600; color: #58a6ff; background: transparent;")
+        bl.addWidget(bt)
+
+        for m in self.core.get_available_modules():
+            mi = QLabel(f"  ✅  {m}")
+            mi.setStyleSheet("font-size: 12px; color: #e1e4e8; padding: 6px 0; background: transparent;")
+            bl.addWidget(mi)
+
+        wl.addWidget(box, alignment=Qt.AlignCenter)
+        self.stack.addWidget(welcome)
+
+        # Páginas de módulos (placeholder para usuarios)
+        self.stack.addWidget(QWidget())
+
+    def _show_page(self, key):
+        for k, btn in self.nav_btns.items():
+            btn.setChecked(k == key)
+
+        if key == "inicio":
+            self.stack.setCurrentIndex(0)
+            return
+
+        if key == "usuarios" and "usuarios" not in self.pages:
+            panel = AdminPanel(self.db, parent=self)
+            self.pages["usuarios"] = panel
+            self.stack.addWidget(panel)
+            self.stack.setCurrentWidget(panel)
+            panel._load_data()
+        elif key == "usuarios" and "usuarios" in self.pages:
+            self.stack.setCurrentWidget(self.pages["usuarios"])
+            self.pages["usuarios"]._load_data()
+
+    def _confirm_logout(self):
+        confirm = QMessageBox.question(
+            self, "Cerrar sesión",
+            "¿Está seguro de cerrar sesión?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if confirm == QMessageBox.Yes:
+            self.close()
 
 
-# ── Entry Point ──────────────────────────────────────────────────────
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("ERP Constructora")
-    app.setStyleSheet(DARK_STYLE)
+    apply_style(app)
 
-    # Inicializar BD
-    db = Database(DB_PATH)
-    db.connect()
-    db.ensure_defaults()  # Crear usuario admin por defecto
+    repo = UsuarioRepository(DB_PATH)
+    repo.ensure_defaults()
 
-    # Login
-    login = LoginDialog(db)
-    if login.exec() != QDialog.Accepted:
+    login = LoginDialog(repo)
+    if login.exec() != LoginDialog.Accepted:
         sys.exit(0)
 
-    # Dashboard
-    dashboard = MainDashboard(db)
-    dashboard.show()
+    user = login.get_logged_user()
+    if not user:
+        sys.exit(0)
 
-    exit_code = app.exec()
-    db.close()
-    sys.exit(exit_code)
+    dash = DashboardMain(repo, user)
+    dash.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
