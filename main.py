@@ -129,6 +129,23 @@ class DashboardMain(QMainWindow):
             sl.addWidget(btn)
             self.nav_btns[key] = btn
 
+        # Separador visual
+        sep = QLabel("")
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background: #21262d; margin: 8px 12px;")
+        sl.addWidget(sep)
+
+        # Modulos disponibles
+        mod_title = QLabel("MÓDULOS ACTIVOS")
+        mod_title.setStyleSheet("font-size: 10px; color: #484f58; letter-spacing: 1px; padding: 8px 12px 4px; background: transparent;")
+        sl.addWidget(mod_title)
+
+        info = self.core.get_user_info()
+        for m in self.core.get_available_modules():
+            mi = QLabel(f"  ✅  {m}")
+            mi.setStyleSheet("font-size: 11px; color: #8b949e; padding: 4px 12px; background: transparent;")
+            sl.addWidget(mi)
+
         sl.addStretch()
         ver = QLabel(f"v{VERSION}")
         ver.setStyleSheet("font-size: 10px; color: #484f58; padding: 8px 12px; background: transparent;")
@@ -183,7 +200,7 @@ class DashboardMain(QMainWindow):
                 self.pages["usuarios"] = panel
                 self.stack.addWidget(panel)
             self.stack.setCurrentWidget(self.pages["usuarios"])
-            self.pages["usuarios"]._load_data()
+            self.pages["usuarios"].refresh()
 
     def _confirm_logout(self):
         if QMessageBox.question(self, "Cerrar sesión", "¿Está seguro de cerrar sesión?",

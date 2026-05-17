@@ -321,6 +321,10 @@ class AdminPanel(QWidget):
 
         layout.addLayout(action_layout)
 
+    def refresh(self):
+        """Método público para recargar datos."""
+        self._load_data()
+
     def _load_data(self):
         """Carga los datos en la tabla."""
         usuarios = self.db.get_all_usuarios()
